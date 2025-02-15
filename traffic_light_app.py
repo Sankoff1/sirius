@@ -1,3 +1,9 @@
+# Для Windows (в командной строке или PowerShell):
+# pip install opencv-python numpy Pillow ultralytics
+#
+# Для macOS (в Terminal, возможно, потребуется pip3):
+# pip3 install opencv-python numpy Pillow ultralytics
+
 import cv2
 import numpy as np
 import logging
@@ -7,14 +13,14 @@ from PIL import Image, ImageTk
 from ultralytics import YOLO
 
 # ГЛОБАЛЫЕ НАСТРОЙКИ
-MODEL_PATH = "yolov8n.pt"      # Путь к модели YOLO
-VIDEO_SOURCE = "4.mp4"         # Источник видео
-IOU_POROG = 0.5                # Порог IoU для сопоставления объектов
-SWITCH_SVETOFOR = 3.0          # Время (сек) до переключения светофора с RED на GREEN
-GREEN_DURATION = 5.0           # Длительность зеленого сигнала (сек)
-UPDATE_DELAY = 10              # Задержка обновления кадра (мс)
+MODEL_PATH = "yolov8n.pt"  # Путь к модели YOLO
+VIDEO_SOURCE = "4.mp4"  # Источник видео
+IOU_POROG = 0.5  # Порог IoU для сопоставления объектов
+SWITCH_SVETOFOR = 3.0  # Время (сек) до переключения светофора с RED на GREEN
+GREEN_DURATION = 5.0  # Длительность зеленого сигнала (сек)
+UPDATE_DELAY = 10  # Задержка обновления кадра (мс)
 
-# Начальные размеры отображения (если динамические размеры еще не установлены)
+# Начальные размеры прило 
 DEFAULT_WIDTH = 640
 DEFAULT_HEIGHT = 480
 
@@ -41,17 +47,17 @@ def find_matching_object(detection_box, tracked_objects, IOU_POROG=IOU_POROG):
 
 class ZoneSelector:
     def __init__(self, canvas, canvas_width, canvas_height):
-        # Здесь canvas_width и canvas_height – размеры канвы, по которым выбирается зона
+
         self.canvas = canvas
         self.points = []
         self.canvas_width = canvas_width
         self.canvas_height = canvas_height
-        self.polygon_id = None  # ID полигона
+        self.polygon_id = None
 
         # Привязываем события мыши и клавиатуры
         self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Button-3>", self.on_right_click)  # Правая кнопка для завершения
-        self.canvas.bind("<BackSpace>", self.delete_last_point)  # Backspace для удаления последней точки
+        self.canvas.bind("<Button-3>", self.on_right_click)  # Правая кнопка для стяжки точек
+        self.canvas.bind("<BackSpace>", self.delete_last_point)  # Backspace для удаления последней точки - отключ
 
     def on_click(self, event):
         x, y = event.x, event.y
@@ -119,15 +125,14 @@ class TrafficLightApp:
         if not ret:
             print("Ошибка открытия видео!")
             sys.exit(1)
-        # Оригинальные размеры видео
+
         self.frame_height, self.frame_width = frame.shape[:2]
-        # Значения по умолчанию для отображения, если динамика еще не установлена
+
         self.default_display_width = DEFAULT_WIDTH
         self.default_display_height = DEFAULT_HEIGHT
 
         self.mask = None
 
-        # Отображаем первый кадр (масштабируется динамически в update)
         display_frame = cv2.resize(frame, (self.default_display_width, self.default_display_height))
         rgb_image = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
         imgtk = ImageTk.PhotoImage(image=Image.fromarray(rgb_image))
@@ -147,7 +152,6 @@ class TrafficLightApp:
         self.updating = False  # видео изначально на паузе
 
         self.btn_select_zone.config(command=self.select_zone)
-        # Удалена привязка клавиши "P" для ручного переключения светофора
 
     def update(self):
         if not self.updating:
@@ -161,21 +165,17 @@ class TrafficLightApp:
 
         current_time = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
 
-        # Определяем динамический размер видео: используем размеры виджета video_label,
-        # если они доступны, иначе применяем значения по умолчанию.
         dynamic_width = self.video_label.winfo_width()
         dynamic_height = self.video_label.winfo_height()
         if dynamic_width < 50 or dynamic_height < 50:
             dynamic_width = self.default_display_width
             dynamic_height = self.default_display_height
 
-        # Относительные параметры для таймера рассчитываются по оригинальному размеру видео
         timer_x = int(self.frame_width * 0.02)
         timer_y = int(self.frame_height * 0.1)
         font_scale = (self.frame_height / 480.0) * 0.75
         thickness = max(1, int(font_scale * 2))
 
-        # Масштабируем маску до оригинального размера кадра
         mask_resized = cv2.resize(self.mask, (frame.shape[1], frame.shape[0]))
         masked_frame = cv2.bitwise_and(frame, frame, mask=mask_resized)
         mask_color = cv2.cvtColor(mask_resized, cv2.COLOR_GRAY2BGR)
@@ -267,11 +267,7 @@ class TrafficLightApp:
         self.light_canvas.create_oval(50, 170, 150, 270, fill=bottom_color, outline="black", width=2)
 
     def select_zone(self):
-        """
-        Останавливаем обновление видео (оно и так на паузе) и открываем окно для выделения зоны.
-        Здесь канва для выбора зоны создаётся с динамическим размером, равным текущему размеру video_label.
-        После завершения выборная маска масштабируется обратно до оригинальных размеров видео.
-        """
+
         ret, frame = self.cap.read()
         if not ret:
             print("Невозможно получить кадр для выделения зоны.")
@@ -301,7 +297,7 @@ class TrafficLightApp:
         def finish_zone():
             zone_mask = self.zone_selector.get_mask()
             if zone_mask is not None and np.count_nonzero(zone_mask) > 0:
-                # Масштабируем маску обратно до оригинальных размеров видео
+
                 new_mask = cv2.resize(zone_mask, (self.frame_width, self.frame_height), interpolation=cv2.INTER_NEAREST)
                 self.mask = new_mask
                 print("Зона выделена и маска обновлена.")
@@ -322,11 +318,9 @@ if __name__ == "__main__":
     app_frame = tk.Frame(root)
     app_frame.pack(fill="both", expand=True)
 
-    # Левый блок: видео
     video_label = tk.Label(app_frame, bg="black")
     video_label.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-    # Правый блок: панель светофора и кнопка выбора зоны
     right_frame = tk.Frame(app_frame)
     right_frame.grid(row=0, column=1, padx=10, pady=10, sticky="n")
     light_canvas = tk.Canvas(right_frame, width=200, height=350, bg="white")
@@ -334,7 +328,6 @@ if __name__ == "__main__":
     btn_select_zone = tk.Button(right_frame, text="Выбрать зону")
     btn_select_zone.pack(pady=10)
 
-    # Настройка grid для динамического изменения размеров
     app_frame.columnconfigure(0, weight=1)
     app_frame.rowconfigure(0, weight=1)
 
