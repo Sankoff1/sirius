@@ -1,9 +1,3 @@
-# Для Windows (в командной строке или PowerShell):
-# pip install opencv-python numpy Pillow ultralytics
-#
-# Для macOS (в Terminal, возможно, потребуется pip3):
-# pip3 install opencv-python numpy Pillow ultralytics
-
 import cv2
 import numpy as np
 import logging
@@ -11,21 +5,22 @@ import sys
 import tkinter as tk
 from PIL import Image, ImageTk
 from ultralytics import YOLO
+import requests  # Импорт для работы с HTTP запросами
 
 # ГЛОБАЛЫЕ НАСТРОЙКИ
-MODEL_PATH = "yolov8n.pt"  # Путь к модели YOLO
-VIDEO_SOURCE = "4.mp4"  # Источник видео
-IOU_POROG = 0.5  # Порог IoU для сопоставления объектов
-SWITCH_SVETOFOR = 3.0  # Время (сек) до переключения светофора с RED на GREEN
-GREEN_DURATION = 5.0  # Длительность зеленого сигнала (сек)
-UPDATE_DELAY = 10  # Задержка обновления кадра (мс)
+MODEL_PATH = "yolov8n.pt"      # Путь к модели YOLO
+VIDEO_SOURCE = "4.mp4"         # Источник видео
+IOU_POROG = 0.5                # Порог IoU для сопоставления объектов
+SWITCH_SVETOFOR = 2.0          # Время (сек) до переключения светофора с RED на GREEN
+GREEN_DURATION = 2.0          # Длительность зеленого сигнала (сек)
+UPDATE_DELAY = 10              # Задержка обновления кадра (мс)
+ARDUINO_BASE_URL = "http://192.168.0.119"  # IP Arduino
 
-# Начальные размеры прило 
+# Начальные размеры приложения
 DEFAULT_WIDTH = 640
 DEFAULT_HEIGHT = 480
 
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
-
 
 def compute_iou(boxA, boxB):
     xA = max(boxA[0], boxB[0])
@@ -37,42 +32,47 @@ def compute_iou(boxA, boxB):
     boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
     return interArea / float(boxAArea + boxBArea - interArea)
 
-
 def find_matching_object(detection_box, tracked_objects, IOU_POROG=IOU_POROG):
     for obj_id, data in tracked_objects.items():
         if compute_iou(data["coords"], detection_box) > IOU_POROG:
             return obj_id
     return None
 
+def send_arduino_command(command):
+
+    url = ARDUINO_BASE_URL + command
+    try:
+        response = requests.get(url, timeout=1)
+        if response.status_code == 200:
+            print(f"Команда {command} успешно отправлена.")
+        else:
+            print(f"Ошибка при отправке команды {command}: статус {response.status_code}")
+    except Exception as e:
+        print(f"Ошибка при обращении к Arduino: {e}")
 
 class ZoneSelector:
     def __init__(self, canvas, canvas_width, canvas_height):
-
         self.canvas = canvas
         self.points = []
         self.canvas_width = canvas_width
         self.canvas_height = canvas_height
         self.polygon_id = None
 
-        # Привязываем события мыши и клавиатуры
         self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Button-3>", self.on_right_click)  # Правая кнопка для стяжки точек
-        self.canvas.bind("<BackSpace>", self.delete_last_point)  # Backspace для удаления последней точки - отключ
+        self.canvas.bind("<Button-3>", self.on_right_click)
+        self.canvas.bind("<BackSpace>", self.delete_last_point)
 
     def on_click(self, event):
         x, y = event.x, event.y
-        # Замыкаем полигон, если достаточно точек и курсор близко к первой точке
         if self.points and len(self.points) >= 3:
             first_point = self.points[0]
-            threshold = 10  # порог в пикселях
+            threshold = 10
             if abs(x - first_point[0]) < threshold and abs(y - first_point[1]) < threshold:
                 self.on_right_click(event)
-                # Отключаем дальнейший ввод
                 self.canvas.unbind("<Button-1>")
                 self.canvas.unbind("<Button-3>")
                 self.canvas.unbind("<BackSpace>")
                 return
-
         self.points.append((x, y))
         r = 3
         self.canvas.create_oval(x - r, y - r, x + r, y + r, fill="blue", tags="points")
@@ -82,7 +82,7 @@ class ZoneSelector:
     def on_right_click(self, event):
         if len(self.points) >= 3:
             self.canvas.create_line(self.points[-1][0], self.points[-1][1],
-                                    self.points[0][0], self.points[0][1], fill="blue", width=2, tags="points")
+                                     self.points[0][0], self.points[0][1], fill="blue", width=2, tags="points")
             if self.polygon_id:
                 self.canvas.delete(self.polygon_id)
             self.polygon_id = self.canvas.create_polygon(self.points, outline="blue", fill="", width=2, tags="points")
@@ -99,18 +99,16 @@ class ZoneSelector:
                     self.canvas.create_oval(x - r, y - r, x + r, y + r, fill="blue", tags="points")
                     if idx > 0:
                         self.canvas.create_line(self.points[idx - 1][0], self.points[idx - 1][1], x, y, fill="blue",
-                                                width=2, tags="points")
+                                                 width=2, tags="points")
         else:
             print("Больше точек для удаления нет.")
 
     def get_mask(self):
-        # Возвращает маску с размерами канвы (масштабированного изображения)
         mask = np.zeros((self.canvas_height, self.canvas_width), dtype=np.uint8)
         if len(self.points) >= 3:
             pts = np.array(self.points, dtype=np.int32).reshape((-1, 1, 2))
             cv2.fillPoly(mask, [pts], 255)
         return mask
-
 
 class TrafficLightApp:
     def __init__(self, root, video_label, light_canvas, btn_select_zone):
@@ -127,7 +125,6 @@ class TrafficLightApp:
             sys.exit(1)
 
         self.frame_height, self.frame_width = frame.shape[:2]
-
         self.default_display_width = DEFAULT_WIDTH
         self.default_display_height = DEFAULT_HEIGHT
 
@@ -142,14 +139,18 @@ class TrafficLightApp:
         self.tracked_objects = {}
         self.next_obj_id = 0
 
-        # Таймер – инициализация на основе текущего времени видео
         current_time = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-        self.crossing_start_time = None  # время входа первого пешехода в зону
-        self.red_start_time = current_time  # старт таймера для состояния RED
-        self.traffic_light_state = "RED"  # начальное состояние светофора – RED
+        self.crossing_start_time = None
+        self.red_start_time = current_time
+        self.green_start_time = current_time
+        self.traffic_light_state = "RED"
 
-        self.zone_selector = None  # будет создан при выборе зоны
-        self.updating = False  # видео изначально на паузе
+        # Начальное состояние Arduino: красный включён, зеленый выключен
+        send_arduino_command("/14/off")
+        send_arduino_command("/12/on")
+
+        self.zone_selector = None
+        self.updating = False
 
         self.btn_select_zone.config(command=self.select_zone)
 
@@ -185,7 +186,6 @@ class TrafficLightApp:
         results = self.model(masked_frame, verbose=False)
         result = results[0]
         for box in result.boxes:
-            # Класс 0 – пешеход
             if int(box.cls.item()) == 0:
                 coords = box.xyxy[0].cpu().numpy().astype(int)
                 x1, y1, x2, y2 = coords
@@ -217,7 +217,7 @@ class TrafficLightApp:
                     positions = self.tracked_objects[obj_id]["positions"]
                     if len(positions) > 1:
                         pts = np.array(positions, np.int32).reshape((-1, 1, 2))
-                        cv2.polylines(overlay, [pts], False, (255, 0, 0), thickness=2)
+                        cv2.polylines(overlay, [pts], False, (255, 0, 0), thickness)
 
         for obj_id in list(self.tracked_objects.keys()):
             if current_time - self.tracked_objects[obj_id]["last_seen_time"] > 1.0:
@@ -225,27 +225,44 @@ class TrafficLightApp:
                 if not self.tracked_objects:
                     self.crossing_start_time = None
 
-        # Логика светофора с выводом таймера
-        if self.tracked_objects:
-            if self.traffic_light_state == "RED":
-                red_elapsed = current_time - self.red_start_time
-                cv2.putText(overlay, f"Red: {red_elapsed:.1f}s", (timer_x, timer_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thickness)
-                if red_elapsed >= SWITCH_SVETOFOR:
-                    self.traffic_light_state = "GREEN"
-                    self.green_start_time = current_time
-            elif self.traffic_light_state == "GREEN":
-                green_elapsed = current_time - self.green_start_time
-                cv2.putText(overlay, f"Green: {green_elapsed:.1f}s", (timer_x, timer_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
-                if green_elapsed >= GREEN_DURATION:
-                    self.traffic_light_state = "RED"
-                    self.red_start_time = current_time
-        else:
-            self.traffic_light_state = "RED"
+        # Если объектов нет, сбрасываем таймер, чтобы red_elapsed не накапливался
+        if not self.tracked_objects:
             self.red_start_time = current_time
 
-        # Масштабируем итоговый кадр до текущего динамического размера для отображения
+        if self.tracked_objects:
+            if self.traffic_light_state == "RED" and (current_time - self.red_start_time) >= SWITCH_SVETOFOR:
+                self.traffic_light_state = "GREEN"
+                self.green_start_time = current_time
+                send_arduino_command("/14/on")
+                send_arduino_command("/12/off")
+            elif self.traffic_light_state == "GREEN" and (current_time - self.green_start_time) >= GREEN_DURATION:
+                self.traffic_light_state = "RED"
+                self.red_start_time = current_time
+                send_arduino_command("/12/on")
+                send_arduino_command("/14/off")
+        else:
+            # Если объектов нет, всегда обновляем красный таймер и переводим в RED, если необходимо
+            self.red_start_time = current_time
+            if self.traffic_light_state != "RED":
+                self.traffic_light_state = "RED"
+                send_arduino_command("/14/off")
+                send_arduino_command("/12/on")
+
+        if self.traffic_light_state == "RED":
+            red_elapsed = current_time - self.red_start_time
+            green_elapsed = 0.0
+        elif self.traffic_light_state == "GREEN":
+            green_elapsed = current_time - self.green_start_time
+            red_elapsed = 0.0
+        else:
+            red_elapsed = 0.0
+            green_elapsed = 0.0
+
+        cv2.putText(overlay, f"Red: {red_elapsed:.1f}s", (timer_x, timer_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thickness)
+        cv2.putText(overlay, f"Green: {green_elapsed:.1f}s", (timer_x, timer_y + int(30 * font_scale)),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
+
         display_frame = cv2.resize(overlay, (dynamic_width, dynamic_height))
         rgb_display = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
         imgtk = ImageTk.PhotoImage(image=Image.fromarray(rgb_display))
@@ -267,13 +284,11 @@ class TrafficLightApp:
         self.light_canvas.create_oval(50, 170, 150, 270, fill=bottom_color, outline="black", width=2)
 
     def select_zone(self):
-
         ret, frame = self.cap.read()
         if not ret:
             print("Невозможно получить кадр для выделения зоны.")
             return
 
-        # Получаем текущие размеры video_label
         current_width = self.video_label.winfo_width()
         current_height = self.video_label.winfo_height()
         if current_width < 50 or current_height < 50:
@@ -297,7 +312,6 @@ class TrafficLightApp:
         def finish_zone():
             zone_mask = self.zone_selector.get_mask()
             if zone_mask is not None and np.count_nonzero(zone_mask) > 0:
-
                 new_mask = cv2.resize(zone_mask, (self.frame_width, self.frame_height), interpolation=cv2.INTER_NEAREST)
                 self.mask = new_mask
                 print("Зона выделена и маска обновлена.")
@@ -309,7 +323,6 @@ class TrafficLightApp:
 
         btn_finish = tk.Button(zone_window, text="Завершить выбор", command=finish_zone)
         btn_finish.pack()
-
 
 if __name__ == "__main__":
     root = tk.Tk()
